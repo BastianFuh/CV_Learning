@@ -79,3 +79,4 @@ wrapt==1.16.0
 xxhash==3.5.0
 yarl==1.17.1
 matplotlib==3.9.2
+torcheval==0.0.7
