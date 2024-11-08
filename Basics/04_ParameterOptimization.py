@@ -90,7 +90,7 @@ def eval(model, dataloader: DataLoader, loss_fn, device="cuda"):
             prediction = model(data)
 
             loss = loss_fn(prediction, target)
-            test_loss = loss.item()
+            test_loss += loss.item()
 
             correct += (
                 (
@@ -104,7 +104,7 @@ def eval(model, dataloader: DataLoader, loss_fn, device="cuda"):
 
             progress_bar.update(1)
 
-    test_loss  # /= num_batches
+    test_loss /= num_batches
     correct /= size
     results_eval.append(correct)
     loss_eval.append(test_loss)
