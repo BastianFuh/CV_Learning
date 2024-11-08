@@ -17,7 +17,6 @@ import numpy as np
 import tqdm
 from datasets import Dataset
 
-
 results_eval = list()
 results_train = list()
 
@@ -205,6 +204,12 @@ if __name__ == "__main__":
 
     model.to("cuda")
     for e in range(epoch):
+        results_eval.clear()
+        results_train.clear()
+
+        loss_eval.clear()
+        loss_train.clear()
+
         train(model, train_dataloader, loss_fn, optimizer, progress_bar)
 
         eval(model, test_dataloader, loss_fn)
