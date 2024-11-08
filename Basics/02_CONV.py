@@ -140,6 +140,9 @@ if __name__ == "__main__":
         num_workers=4,
         batch_size=32,
         shuffle=True,
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
     test_dataloader = DataLoader(
         dataset["test"],
@@ -147,6 +150,9 @@ if __name__ == "__main__":
         num_workers=4,
         batch_size=16,
         shuffle=True,
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True,
     )
 
     progress = tqdm.tqdm(range(len(train_dataloader) * epoch))
