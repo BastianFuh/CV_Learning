@@ -5,8 +5,6 @@ This code is based on code examples given in
 Originally Keras was used for them and were adapted to pytorch.
 """
 
-import os
-import PIL.Image
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -16,8 +14,8 @@ import torch.nn as nn
 import datasets
 from torchsummary import summary
 import tqdm
-from torchvision.transforms import v2
-import timm
+from torchvision.transforms import v2 as transforms
+from torchvision.models import vgg16
 
 results_train = list()
 loss_train = list()
@@ -41,7 +39,7 @@ def train(
 
     model.train()
     for i, batch in enumerate(dataloader):
-        data = batch["data"].to(device)
+        data = batch["image"].to(device)
         target = batch["target"].to(device)
 
         prediction = model(data)
@@ -83,7 +81,7 @@ def eval(model, dataloader: DataLoader, loss_fn, device="cuda", epoch=0):
 
     with torch.no_grad():
         for batch in dataloader:
-            data = batch["data"].to(device)
+            data = batch["image"].to(device)
             target = batch["target"].to(device)
 
             prediction = model(data)
@@ -116,7 +114,7 @@ def eval(model, dataloader: DataLoader, loss_fn, device="cuda", epoch=0):
 def collate_fn(batch):
     result = dict()
     result["target"] = torch.tensor([x["target"] for x in batch], dtype=torch.float32)
-    result["data"] = torch.tensor([x["data"] for x in batch], dtype=torch.float32)
+    result["image"] = torch.stack([x["image"] for x in batch])
 
     return result
 
@@ -132,17 +130,24 @@ if __name__ == "__main__":
     input_channels = 3
     base_hidden_units = 32
 
-    model = timm.create_model("vgg16.tv_in1k", pretrained=True)
+    model = vgg16()
+
+    print(model)
 
     # Freeze Network
     model.features.requires_grad_(False)
-    # model.pre_logits.requires_grad_(False)
 
     # Create new head
-    model.head = timm.layers.classifier.ClassifierHead(model.head.in_features, 2)
+    model.classifier = nn.Sequential(
+        nn.Linear(in_features=25088, out_features=64),
+        nn.ReLU(),
+        nn.BatchNorm1d(64),
+        nn.Dropout(),
+        nn.Linear(in_features=64, out_features=2),
+    )
 
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     scheduler = LinearLR(optimizer, total_iters=epoch)
 
     summary(model, (3, 224, 224), device="cpu")
@@ -161,51 +166,54 @@ if __name__ == "__main__":
         }
     )
 
-    dataset_same_size = dataset_onehot.map(
-        lambda x: {"img": x["image"].resize((224, 224))}
-    )
-
-    # Convert Image
-    # The base images are ordered in Height, Width and Color, but
-    # the Model expects it to be Color, Height, Width,
-    # So the images are here transposed to seperate the color channels into their own
-    # images
-    dataset_converted_image = dataset_same_size.map(
-        lambda x: {
-            "data": torch.from_numpy(
-                np.array(x["img"]).astype(np.float32),
-            )
-            .transpose(0, -1)
-            .transpose(1, 2)
-        }
-    )
-
-    dataset = dataset_converted_image.remove_columns("image")
-    dataset = dataset_converted_image.remove_columns("img")
-    dataset = dataset.remove_columns("label")
+    dataset = dataset_onehot.remove_columns("label")
+    # dataset = dataset.remove_columns("image")
 
     print(dataset)
 
     # Some data augmentation
     data_transform = {
-        "train": v2.Compose(
+        "train": transforms.Compose(
             [
-                v2.RandomRotation(15),
-                v2.RandomHorizontalFlip(0.1),
-                v2.RandomAffine(0, (0.2, 0.2)),
+                transforms.Resize((224, 224)),
+                # transforms.RandomRotation(15),
+                # transforms.RandomHorizontalFlip(0.1),
+                # transforms.RandomAffine(0, (0.2, 0.2)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
             ]
         ),
-        # "valid": v2.Compose(v2.CenterCrop()),
-        # "test": v2.Compose(),
+        "valid": transforms.Compose(
+            [
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
+            ]
+        ),
+        "test": transforms.Compose(
+            [
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
+            ]
+        ),
     }
 
-    # dataset.set_transform(data_transform)
+    dataset["train"].set_transform(data_transform["train"])
+    dataset["validation"].set_transform(data_transform["valid"])
+    dataset["test"].set_transform(data_transform["test"])
 
     train_dataloader = DataLoader(
         dataset["train"],
         collate_fn=collate_fn,
         num_workers=4,
-        batch_size=4,
+        batch_size=20,
         shuffle=True,
         pin_memory=True,
         prefetch_factor=100,
@@ -215,9 +223,9 @@ if __name__ == "__main__":
     valid_dataloader = DataLoader(
         dataset["validation"],
         collate_fn=collate_fn,
-        num_workers=4,
-        batch_size=4,
-        shuffle=True,
+        num_workers=30,
+        batch_size=2,
+        shuffle=False,
         pin_memory=True,
         prefetch_factor=100,
         persistent_workers=True,
@@ -227,8 +235,8 @@ if __name__ == "__main__":
         dataset["test"],
         collate_fn=collate_fn,
         num_workers=4,
-        batch_size=4,
-        shuffle=True,
+        batch_size=50,
+        shuffle=False,
         pin_memory=True,
         prefetch_factor=100,
         persistent_workers=True,
@@ -238,7 +246,7 @@ if __name__ == "__main__":
 
     model = model.to("cuda")
 
-    eval(model, test_dataloader, loss_fn)
+    eval(model, valid_dataloader, loss_fn)
     for e in range(epoch):
         results_eval.clear()
         results_train.clear()
@@ -248,6 +256,9 @@ if __name__ == "__main__":
 
         train(model, train_dataloader, loss_fn, optimizer, progress)
 
+        print("Train Data")
+        eval(model, train_dataloader, loss_fn, epoch=e)
+        print("Validate Data")
         eval(model, valid_dataloader, loss_fn, epoch=e)
         scheduler.step()
 
