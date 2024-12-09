@@ -5,6 +5,7 @@ This code is based on code examples given in
 Originally Keras was used for them and were adapted to pytorch.
 """
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -65,11 +66,11 @@ def train(
 
     correct /= dataset_size
     test_loss /= num_batches
-    results_train.append(correct)
-    loss_train.append(test_loss)
 
 
-def eval(model, dataloader: DataLoader, loss_fn, device="cuda", epoch=0):
+def eval(
+    model, dataloader: DataLoader, loss_fn, device="cuda", epoch=0, extra_print=""
+):
     model.eval()
 
     dataset_size = len(dataloader.dataset)
@@ -103,12 +104,12 @@ def eval(model, dataloader: DataLoader, loss_fn, device="cuda", epoch=0):
 
     correct /= dataset_size
     test_loss /= num_batches
-    results_eval.append(correct)
-    loss_eval.append(test_loss)
 
-    print(
-        f"\nEpoch {epoch} = Test Accuracy: {(100*correct):>0.1f}%, Test Avg loss: {test_loss:>8f} \n"
+    progress_bar.write(
+        f"{extra_print} - Epoch {epoch} = Test Accuracy: {(100*correct):>0.1f}%, Test Avg loss: {test_loss:>8f}\n"
     )
+
+    return (correct, test_loss)
 
 
 def collate_fn(batch):
@@ -119,16 +120,20 @@ def collate_fn(batch):
     return result
 
 
+def augment_dataset(dataset):
+    pass
+
+
 idx_to_label = {
     0: "cat",
     1: "dog",
 }
 
 if __name__ == "__main__":
-    epoch = 20
+    epoch = 50
 
     input_channels = 3
-    base_hidden_units = 32
+    base_hidden_units = 64
 
     model = vgg16()
 
@@ -138,22 +143,24 @@ if __name__ == "__main__":
     model.features.requires_grad_(False)
 
     # Create new head
+    hidden_layer_size = 128
     model.classifier = nn.Sequential(
-        nn.Linear(in_features=25088, out_features=64),
+        nn.Linear(in_features=25088, out_features=hidden_layer_size),
         nn.ReLU(),
-        nn.BatchNorm1d(64),
-        nn.Dropout(),
-        nn.Linear(in_features=64, out_features=2),
+        nn.BatchNorm1d(int(hidden_layer_size)),
+        nn.Dropout(0.5),
+        nn.Linear(in_features=int(hidden_layer_size), out_features=2),
     )
 
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
-    scheduler = LinearLR(optimizer, total_iters=epoch)
 
     summary(model, (3, 224, 224), device="cpu")
 
     # Prepare data
     dataset_raw = datasets.load_dataset("TransferLearning/01_data")
+
+    dataset_raw["train"]
 
     print(dataset_raw)
 
@@ -175,11 +182,12 @@ if __name__ == "__main__":
     data_transform = {
         "train": transforms.Compose(
             [
-                transforms.Resize((224, 224)),
-                # transforms.RandomRotation(15),
-                # transforms.RandomHorizontalFlip(0.1),
-                # transforms.RandomAffine(0, (0.2, 0.2)),
-                transforms.ToTensor(),
+                transforms.Resize((250, 250)),
+                # transforms.FiveCrop((224, 224)),
+                transforms.RandomHorizontalFlip(0.5),
+                transforms.RandomCrop(224),
+                transforms.ToImage(),
+                transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
                 ),
@@ -188,7 +196,8 @@ if __name__ == "__main__":
         "valid": transforms.Compose(
             [
                 transforms.Resize((224, 224)),
-                transforms.ToTensor(),
+                transforms.ToImage(),
+                transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
                 ),
@@ -197,7 +206,8 @@ if __name__ == "__main__":
         "test": transforms.Compose(
             [
                 transforms.Resize((224, 224)),
-                transforms.ToTensor(),
+                transforms.ToImage(),
+                transforms.ToDtype(torch.float32, scale=True),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
                 ),
@@ -205,15 +215,15 @@ if __name__ == "__main__":
         ),
     }
 
-    dataset["train"].set_transform(data_transform["train"])
+    dataset["train"].set_transform(data_transform["test"])
     dataset["validation"].set_transform(data_transform["valid"])
-    dataset["test"].set_transform(data_transform["test"])
+    dataset["test"].set_transform(data_transform["train"])
 
     train_dataloader = DataLoader(
-        dataset["train"],
+        dataset["test"],
         collate_fn=collate_fn,
         num_workers=4,
-        batch_size=20,
+        batch_size=30,
         shuffle=True,
         pin_memory=True,
         prefetch_factor=100,
@@ -223,8 +233,8 @@ if __name__ == "__main__":
     valid_dataloader = DataLoader(
         dataset["validation"],
         collate_fn=collate_fn,
-        num_workers=30,
-        batch_size=2,
+        num_workers=4,
+        batch_size=30,
         shuffle=False,
         pin_memory=True,
         prefetch_factor=100,
@@ -232,7 +242,7 @@ if __name__ == "__main__":
     )
 
     test_dataloader = DataLoader(
-        dataset["test"],
+        dataset["train"],
         collate_fn=collate_fn,
         num_workers=4,
         batch_size=50,
@@ -246,22 +256,37 @@ if __name__ == "__main__":
 
     model = model.to("cuda")
 
-    eval(model, valid_dataloader, loss_fn)
+    eval(model, valid_dataloader, loss_fn, extra_print="Initial Results")
     for e in range(epoch):
-        results_eval.clear()
-        results_train.clear()
-
-        loss_eval.clear()
-        loss_train.clear()
-
         train(model, train_dataloader, loss_fn, optimizer, progress)
 
-        print("Train Data")
-        eval(model, train_dataloader, loss_fn, epoch=e)
-        print("Validate Data")
-        eval(model, valid_dataloader, loss_fn, epoch=e)
-        scheduler.step()
+        precision, loss = eval(
+            model, train_dataloader, loss_fn, epoch=e, extra_print="Train Eval"
+        )
+        results_train.append(precision)
+        loss_train.append(loss)
 
-    print("Finshed Training")
+        precision, loss = eval(
+            model, valid_dataloader, loss_fn, epoch=e, extra_print="Validate Eval"
+        )
+        results_eval.append(precision)
+        loss_eval.append(loss)
+
+    progress.write("Finshed Training")
     torch.save(model.state_dict(), "model_01.pt")
     eval(model, test_dataloader, loss_fn)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.suptitle("Train")
+    ax1.set_title("Precision")
+    ax1.plot(range(epoch), results_train)
+    ax2.set_title("Loss")
+    ax2.plot(range(epoch), loss_train)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.suptitle("Eval")
+    ax1.set_title("Precision")
+    ax1.plot(range(epoch), results_eval)
+    ax2.set_title("Loss")
+    ax2.plot(range(epoch), loss_eval)
+    plt.show()
