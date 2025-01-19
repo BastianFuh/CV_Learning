@@ -78,7 +78,7 @@ def eval(model, dataloader: DataLoader, loss_fn, device="cuda"):
     test_loss  # /= num_batches
     correct /= size
     print(
-        f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n"
+        f"Test Error: \n Accuracy: {(100 * correct):>0.1f}%, Avg loss: {test_loss:>8f} \n"
     )
 
 
@@ -97,9 +97,11 @@ if __name__ == "__main__":
     model = nn.Sequential(
         # 28x28
         nn.Conv2d(1, 32, (3, 3), 1, padding="same"),
+        nn.ReLU(),
         nn.MaxPool2d((2, 2), 2),
         # 14x14
         nn.Conv2d(32, 64, (3, 3), 1, padding="same"),
+        nn.ReLU(),
         nn.MaxPool2d((2, 2), 2),
         # 7x7
         # Flatten the feature maps
@@ -107,8 +109,8 @@ if __name__ == "__main__":
         nn.Dropout(0.3),
         # Classification layers
         nn.Linear(7 * 7 * 64, 64),
-        nn.ReLU(0.5),
-        nn.Dropout(),
+        nn.ReLU(),
+        nn.Dropout(0.5),
         nn.Linear(64, 10),
     )
 
